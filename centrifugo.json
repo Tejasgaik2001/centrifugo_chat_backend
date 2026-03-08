@@ -1,0 +1,20 @@
+{
+  "token_hmac_secret_key": "your-secret-key-change-this-in-production",
+  "api_key": "your-api-key-change-this-in-production",
+  "admin": true,
+  "admin_password": "admin",
+  "admin_secret": "admin-secret",
+  "allowed_origins": ["*"],
+  "log_level": "info",
+  "namespaces": [
+    {
+      "name": "room",
+      "publish": true,
+      "subscribe_to_publish": true,
+      "presence": true,
+      "join_leave": true,
+      "history_size": 10,
+      "history_ttl": "300s"
+    }
+  ]
+}

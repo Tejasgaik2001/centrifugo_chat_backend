@@ -1,0 +1,164 @@
+import { FastifyInstance } from 'fastify';
+import { WebSocket } from 'ws';
+import { verifyToken } from '../services/auth.service';
+import {
+  getSubscriberRedis,
+  publishToRoom,
+  setPresence,
+  setTyping,
+  clearTyping,
+} from '../services/redis.service';
+
+const userConnections = new Map<string, Set<WebSocket>>();
+const roomSubscriptions = new Map<string, Set<WebSocket>>();
+
+function addUserConnection(userId: string, ws: WebSocket): void {
+  if (!userConnections.has(userId)) {
+    userConnections.set(userId, new Set());
+  }
+  userConnections.get(userId)!.add(ws);
+}
+
+function removeUserConnection(userId: string, ws: WebSocket): void {
+  userConnections.get(userId)?.delete(ws);
+  if (userConnections.get(userId)?.size === 0) {
+    userConnections.delete(userId);
+  }
+}
+
+function subscribeToRoom(roomId: string, ws: WebSocket): void {
+  if (!roomSubscriptions.has(roomId)) {
+    roomSubscriptions.set(roomId, new Set());
+  }
+  roomSubscriptions.get(roomId)!.add(ws);
+}
+
+function unsubscribeFromRoom(roomId: string, ws: WebSocket): void {
+  roomSubscriptions.get(roomId)?.delete(ws);
+  if (roomSubscriptions.get(roomId)?.size === 0) {
+    roomSubscriptions.delete(roomId);
+  }
+}
+
+function safeSend(ws: WebSocket, payload: object): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload));
+  }
+}
+
+export async function registerWebSocket(app: FastifyInstance): Promise<void> {
+  const subscriber = getSubscriberRedis();
+
+  subscriber.on('message', (channel: string, data: string) => {
+    const roomId = channel.replace('room:', '');
+    const payload = JSON.parse(data) as object;
+    const subscribers = roomSubscriptions.get(roomId);
+    if (subscribers) {
+      for (const ws of subscribers) {
+        safeSend(ws, payload);
+      }
+    }
+  });
+
+  app.get('/ws', { websocket: true }, (socket) => {
+    let userId: string | null = null;
+    const subscribedRooms = new Set<string>();
+
+    const authTimeout = setTimeout(() => {
+      if (!userId) {
+        socket.close(4001, 'Authentication timeout');
+      }
+    }, 10000);
+
+    socket.on('message', async (rawData) => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(rawData.toString()) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+
+      switch (msg.type) {
+        case 'auth': {
+          try {
+            const payload = verifyToken(msg.token as string);
+            userId = payload.userId;
+            clearTimeout(authTimeout);
+            addUserConnection(userId, socket);
+            await setPresence(userId, 'online');
+            safeSend(socket, { type: 'auth_ok', userId });
+          } catch {
+            socket.close(4001, 'Invalid token');
+          }
+          break;
+        }
+
+        case 'subscribe': {
+          if (!userId) return;
+          const roomId = msg.roomId as string;
+          subscribeToRoom(roomId, socket);
+          subscribedRooms.add(roomId);
+          await subscriber.subscribe(`room:${roomId}`);
+          break;
+        }
+
+        case 'unsubscribe': {
+          if (!userId) return;
+          const roomId = msg.roomId as string;
+          unsubscribeFromRoom(roomId, socket);
+          subscribedRooms.delete(roomId);
+          break;
+        }
+
+        case 'typing_start': {
+          if (!userId) return;
+          const roomId = msg.roomId as string;
+          await setTyping(roomId, userId);
+          await publishToRoom(roomId, {
+            type: 'typing',
+            roomId,
+            user: { _id: userId },
+            isTyping: true,
+          });
+          break;
+        }
+
+        case 'typing_stop': {
+          if (!userId) return;
+          const roomId = msg.roomId as string;
+          await clearTyping(roomId, userId);
+          await publishToRoom(roomId, {
+            type: 'typing',
+            roomId,
+            user: { _id: userId },
+            isTyping: false,
+          });
+          break;
+        }
+
+        case 'ping': {
+          if (userId) await setPresence(userId, 'online');
+          safeSend(socket, { type: 'pong' });
+          break;
+        }
+
+        default:
+          break;
+      }
+    });
+
+    socket.on('close', () => {
+      clearTimeout(authTimeout);
+      if (userId) {
+        removeUserConnection(userId, socket);
+        for (const roomId of subscribedRooms) {
+          unsubscribeFromRoom(roomId, socket);
+        }
+      }
+    });
+
+    socket.on('error', (err) => {
+      console.error('[WebSocket] Error:', err);
+    });
+  });
+}
