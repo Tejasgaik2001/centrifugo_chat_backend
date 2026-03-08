@@ -44,6 +44,7 @@ export interface IMessage extends Document {
   deletedBy?: { _id: string; username: string };
   pinnedAt?: Date;
   pinnedBy?: { _id: string; username: string };
+  readBy: string[];
   ts: Date;
   updatedAt: Date;
 }
@@ -101,6 +102,7 @@ const messageSchema = new Schema<IMessage>(
       _id: { type: String },
       username: { type: String },
     },
+    readBy: [{ type: String }],
     ts: { type: Date, required: true, default: Date.now },
   },
   {

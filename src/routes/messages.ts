@@ -113,7 +113,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     const total = await Message.countDocuments({ rid, isDeleted: false });
 
     return reply.send({
-      messages: messages.reverse(),
+      messages: messages.toReversed(),
       total,
       hasMore: messages.length === limitNum,
     });
@@ -393,5 +393,58 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const replies = await Message.find({ tmid: id, isDeleted: false }).sort({ ts: 1 }).lean();
     return reply.send({ messages: replies });
+  });
+
+  app.post('/messages/:id/read', {
+    preHandler: [authenticate],
+    schema: {
+      tags: ['Messages'],
+      summary: 'Mark a message as read',
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const message = await Message.findById(id).lean();
+    
+    if (!message) {
+      return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Message not found' } });
+    }
+
+    if (message.u._id === request.user.userId) {
+      return reply.send({ success: true });
+    }
+
+    const subscription = await Subscription.findOne({
+      rid: message.rid,
+      'u._id': request.user.userId,
+      open: true,
+    }).lean();
+    
+    if (!subscription) {
+      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a member of this room' } });
+    }
+
+    await Message.updateOne(
+      { _id: id },
+      { $addToSet: { readBy: request.user.userId } }
+    );
+
+    await centrifugoService.publishReadReceipt(message.rid, request.user.userId, id);
+
+    return reply.send({ success: true });
   });
 }

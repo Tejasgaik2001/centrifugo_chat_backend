@@ -47,6 +47,7 @@
     "@types/supertest": "^6.0.2",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.11",
+    "fastify-tsconfig": "^3.0.0",
     "mongodb-memory-server": "^10.0.0",
     "supertest": "^7.0.0",
     "tsx": "^4.15.0",

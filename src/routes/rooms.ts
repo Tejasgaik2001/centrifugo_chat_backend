@@ -355,10 +355,17 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/rooms/:rid/read', { preHandler: [authenticate] }, async (request, reply) => {
     const { rid } = request.params as { rid: string };
+    
     await Subscription.updateOne(
       { rid, 'u._id': request.user.userId },
       { unread: 0, userMentions: 0, ls: new Date() }
     );
+
+    await Message.updateMany(
+      { rid, 'u._id': { $ne: request.user.userId }, readBy: { $ne: request.user.userId } },
+      { $addToSet: { readBy: request.user.userId } }
+    );
+
     return reply.send({ success: true });
   });
 

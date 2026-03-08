@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import websocket from '@fastify/websocket';
+import websocketPlugin from '@fastify/websocket';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
@@ -71,7 +71,7 @@ async function start(): Promise<void> {
       (request.headers['x-forwarded-for'] as string) ?? request.ip,
   });
 
-  await app.register(websocket);
+  await app.register(websocketPlugin);
 
   app.get('/health', async (_request, reply) => {
     return reply.send({ status: 'ok', timestamp: new Date().toISOString() });
