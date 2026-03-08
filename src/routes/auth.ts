@@ -12,7 +12,7 @@ import {
   revokeSession,
 } from '../services/auth.service';
 import { authenticate } from '../middleware/auth';
-import { setPresence, getRedis } from '../services/redis.service';
+import { getRedis } from '../services/redis.service';
 
 const registerSchema = z.object({
   username: z.string().min(3).max(32).regex(/^[a-z0-9_]+$/),
@@ -98,7 +98,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const { accessToken, refreshToken } = await createSession(userId, { ip: request.ip });
-    await setPresence(userId, 'online');
+    await User.updateOne({ _id: userId }, { status: 'online', lastSeen: new Date() });
 
     return reply.code(201).send({
       user: { _id: user._id, username: user.username, name: user.name, email: user.email },
@@ -173,8 +173,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const { accessToken, refreshToken } = await createSession(user._id as string, { ip: request.ip });
-    await User.updateOne({ _id: user._id }, { status: 'online' });
-    await setPresence(user._id as string, 'online');
+    await User.updateOne({ _id: user._id }, { status: 'online', lastSeen: new Date() });
 
     return reply.send({
       user: { _id: user._id, username: user.username, name: user.name, email: user.email, status: 'online' },

@@ -2,7 +2,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 
 interface PublishData {
-  type: 'message' | 'read_receipt' | 'typing_start' | 'typing_stop' | 'message_update' | 'message_delete';
+  type: 'message' | 'read_receipt' | 'typing_start' | 'typing_stop' | 'message_update' | 'message_delete' | 'presence_change';
   [key: string]: any;
 }
 
@@ -144,6 +144,16 @@ class CentrifugoService {
         roomId: roomId,
         lastReadMessageId: lastReadMessageId,
       },
+    });
+  }
+
+  /**
+   * Publish to any channel (generic method)
+   */
+  async publishToChannel(channel: string, data: any): Promise<void> {
+    await this.publish({
+      channel,
+      data,
     });
   }
 

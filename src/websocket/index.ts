@@ -4,9 +4,9 @@ import { verifyToken } from '../services/auth.service';
 import {
   getSubscriberRedis,
   publishToRoom,
-  setPresence,
   setTyping,
   clearTyping,
+  broadcastPresenceChange,
 } from '../services/redis.service';
 
 const userConnections = new Map<string, Set<WebSocket>>();
@@ -50,12 +50,22 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
   const subscriber = getSubscriberRedis();
 
   subscriber.on('message', (channel: string, data: string) => {
-    const roomId = channel.replace('room:', '');
-    const payload = JSON.parse(data) as object;
-    const subscribers = roomSubscriptions.get(roomId);
-    if (subscribers) {
-      for (const ws of subscribers) {
-        safeSend(ws, payload);
+    if (channel === 'presence') {
+      // Broadcast presence changes to all connected users
+      const payload = JSON.parse(data) as object;
+      for (const [, connections] of userConnections.entries()) {
+        for (const ws of connections) {
+          safeSend(ws, payload);
+        }
+      }
+    } else {
+      const roomId = channel.replace('room:', '');
+      const payload = JSON.parse(data) as object;
+      const subscribers = roomSubscriptions.get(roomId);
+      if (subscribers) {
+        for (const ws of subscribers) {
+          safeSend(ws, payload);
+        }
       }
     }
   });
@@ -85,7 +95,20 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
             userId = payload.userId;
             clearTimeout(authTimeout);
             addUserConnection(userId, socket);
-            await setPresence(userId, 'online');
+            
+            // Get user info for broadcasting and update status
+            const { User } = await import('../models/User');
+            await User.updateOne(
+              { _id: userId },
+              { status: 'online', lastSeen: new Date() }
+            );
+            const user = await User.findById(userId).lean();
+            
+            // Set user online and broadcast presence change
+            if (user) {
+              await broadcastPresenceChange(userId, 'online', user.username);
+            }
+            
             safeSend(socket, { type: 'auth_ok', userId });
           } catch {
             socket.close(4001, 'Invalid token');
@@ -137,8 +160,29 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         }
 
         case 'ping': {
-          if (userId) await setPresence(userId, 'online');
           safeSend(socket, { type: 'pong' });
+          break;
+        }
+
+        case 'set_status': {
+          if (!userId) return;
+          const status = msg.status as 'online' | 'offline' | 'away' | 'dnd';
+          const validStatuses = ['online', 'offline', 'away', 'dnd'];
+          
+          if (validStatuses.includes(status)) {
+            // Update status in database
+            const { User } = await import('../models/User');
+            await User.updateOne(
+              { _id: userId },
+              { status: status as 'online' | 'offline' | 'away' | 'dnd', lastSeen: new Date() }
+            );
+            
+            // Get user info for broadcasting
+            const user = await User.findById(userId).lean();
+            if (user) {
+              await broadcastPresenceChange(userId, status, user.username);
+            }
+          }
           break;
         }
 
@@ -147,10 +191,28 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       }
     });
 
-    socket.on('close', () => {
+    socket.on('close', async () => {
       clearTimeout(authTimeout);
       if (userId) {
         removeUserConnection(userId, socket);
+        
+        // Check if user has any other connections
+        const userConnectionsList = userConnections.get(userId);
+        if (!userConnectionsList || userConnectionsList.size === 0) {
+          // User is completely offline
+          const { User } = await import('../models/User');
+          await User.updateOne(
+            { _id: userId },
+            { status: 'offline', lastSeen: new Date() }
+          );
+          
+          // Get user info for broadcasting
+          const user = await User.findById(userId).lean();
+          if (user) {
+            await broadcastPresenceChange(userId, 'offline', user.username);
+          }
+        }
+        
         for (const roomId of subscribedRooms) {
           unsubscribeFromRoom(roomId, socket);
         }

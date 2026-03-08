@@ -28,13 +28,28 @@ export function getSubscriberRedis(): Redis {
   return subscriberClient;
 }
 
-export async function setPresence(userId: string, status: string): Promise<void> {
-  await getRedis().set(`presence:${userId}`, status, 'EX', 90);
+
+export async function broadcastPresenceChange(userId: string, status: string, username: string): Promise<void> {
+  const payload = {
+    type: 'presence_change',
+    userId,
+    username,
+    status,
+    timestamp: new Date().toISOString(),
+  };
+  
+  // Broadcast via Redis pub/sub for WebSocket server
+  await getRedis().publish('presence', JSON.stringify(payload));
+  
+  // Also broadcast via Centrifugo for frontend clients
+  try {
+    const { centrifugoService } = await import('./centrifugo.service');
+    await centrifugoService.publishToChannel('presence', payload);
+  } catch (error) {
+    console.error('[Redis] Failed to broadcast presence via Centrifugo:', error);
+  }
 }
 
-export async function getPresence(userId: string): Promise<string | null> {
-  return getRedis().get(`presence:${userId}`);
-}
 
 export async function setTyping(roomId: string, userId: string): Promise<void> {
   await getRedis().set(`typing:${roomId}:${userId}`, '1', 'EX', 5);
