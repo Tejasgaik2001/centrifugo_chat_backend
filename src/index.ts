@@ -7,7 +7,7 @@ import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
 import { config } from './config';
 import { connectDatabase } from './services/database.service';
-import { getRedis, closeRedis } from './services/redis.service';
+import { closeRedis } from './services/redis.service';
 import { registerRoutes } from './routes';
 import { registerWebSocket } from './websocket';
 
@@ -73,20 +73,20 @@ async function start(): Promise<void> {
 
   await app.register(websocketPlugin);
 
-  app.get('/health', async (_request, reply) => {
-    return reply.send({ status: 'ok', timestamp: new Date().toISOString() });
+  // Add basic routes to test server functionality
+  app.get('/', async (_request, reply) => {
+    console.log('[Root] Root route called');
+    return reply.send({ message: 'Server is running', timestamp: new Date().toISOString() });
   });
 
-  app.get('/ready', async (_request, reply) => {
-    try {
-      await getRedis().ping();
-      return reply.send({ status: 'ready' });
-    } catch (err) {
-      return reply.code(503).send({ status: 'not ready', error: String(err) });
-    }
+  app.get('/api/v1/test', async (_request, reply) => {
+    console.log('[Test] Direct test route called');
+    return reply.send({ message: 'Test route working', timestamp: new Date().toISOString() });
   });
 
+  console.log('[Server] About to register routes...');
   await registerRoutes(app);
+  console.log('[Server] Routes registered successfully');
   await registerWebSocket(app);
   await connectDatabase();
 

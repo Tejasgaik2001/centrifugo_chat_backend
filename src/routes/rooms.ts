@@ -163,6 +163,21 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     }));
     await Subscription.insertMany(subscriptions);
 
+    // Broadcast room creation to all members via presence channel
+    const { centrifugoService } = await import('../services/centrifugo.service.js');
+    await centrifugoService.publishToChannel('presence', {
+      type: 'room_created',
+      room: {
+        _id: roomId,
+        rid: roomId,
+        name: room.name,
+        type: room.type,
+        memberIds: room.memberIds,
+        usernames: room.usernames,
+      },
+      memberIds: room.memberIds,
+    });
+
     return reply.code(201).send({ room });
   });
 
@@ -350,6 +365,21 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       },
     ]);
 
+    // Broadcast room creation to both members via presence channel
+    const { centrifugoService } = await import('../services/centrifugo.service.js');
+    await centrifugoService.publishToChannel('presence', {
+      type: 'room_created',
+      room: {
+        _id: roomId,
+        rid: roomId,
+        name: null,
+        type: 'd',
+        memberIds: [requestingUser._id.toString(), targetUser._id.toString()],
+        usernames: [requestingUser.username, targetUser.username],
+      },
+      memberIds: [requestingUser._id.toString(), targetUser._id.toString()],
+    });
+
     return reply.code(201).send({ room });
   });
 
@@ -365,6 +395,13 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       { rid, 'u._id': { $ne: request.user.userId }, readBy: { $ne: request.user.userId } },
       { $addToSet: { readBy: request.user.userId } }
     );
+
+    // Broadcast read receipt
+    const lastMessage = await Message.findOne({ rid }).sort({ ts: -1 }).lean();
+    if (lastMessage) {
+      const { centrifugoService } = await import('../services/centrifugo.service');
+      await centrifugoService.publishReadReceipt(rid, request.user.userId, lastMessage._id.toString());
+    }
 
     return reply.send({ success: true });
   });

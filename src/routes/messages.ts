@@ -447,4 +447,173 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({ success: true });
   });
+
+  // Add reaction to message
+  app.post('/messages/:id/reactions', {
+    preHandler: [authenticate],
+    schema: {
+      tags: ['Messages'],
+      summary: 'Add reaction to message',
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+      body: {
+        type: 'object',
+        required: ['emoji'],
+        properties: {
+          emoji: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            reaction: {
+              type: 'object',
+              properties: {
+                emoji: { type: 'string' },
+                userIds: { type: 'array', items: { type: 'string' } },
+                count: { type: 'number' },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { emoji } = request.body as { emoji: string };
+    
+    const message = await Message.findById(id);
+    if (!message) {
+      return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Message not found' } });
+    }
+
+    // Check if user is member of the room
+    const subscription = await Subscription.findOne({
+      rid: message.rid,
+      'u._id': request.user.userId,
+      open: true,
+    }).lean();
+    
+    if (!subscription) {
+      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a member of this room' } });
+    }
+
+    // Initialize reactions map if it doesn't exist
+    if (!message.reactions) {
+      message.reactions = {};
+    }
+
+    // Add or update reaction
+    const reactions = new Map(Object.entries(message.reactions || {}));
+    const existingReaction = reactions.get(emoji);
+    
+    if (existingReaction) {
+      if (!existingReaction.userIds.includes(request.user.userId)) {
+        existingReaction.userIds.push(request.user.userId);
+        existingReaction.count = existingReaction.userIds.length;
+        reactions.set(emoji, existingReaction);
+      }
+    } else {
+      reactions.set(emoji, {
+        emoji,
+        userIds: [request.user.userId],
+        count: 1,
+      });
+    }
+
+    await message.save();
+
+    // Broadcast reaction add event
+    await centrifugoService.publishToChannel(`room:${message.rid}`, {
+      type: 'reaction_add',
+      messageId: id,
+      roomId: message.rid,
+      emoji,
+      userId: request.user.userId,
+      reaction: reactions.get(emoji),
+    });
+
+    return reply.send({ success: true, reaction: reactions.get(emoji) });
+  });
+
+  // Remove reaction from message
+  app.delete('/messages/:id/reactions/:emoji', {
+    preHandler: [authenticate],
+    schema: {
+      tags: ['Messages'],
+      summary: 'Remove reaction from message',
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          emoji: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id, emoji } = request.params as { id: string; emoji: string };
+    
+    const message = await Message.findById(id);
+    if (!message) {
+      return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Message not found' } });
+    }
+
+    // Check if user is member of the room
+    const subscription = await Subscription.findOne({
+      rid: message.rid,
+      'u._id': request.user.userId,
+      open: true,
+    }).lean();
+    
+    if (!subscription) {
+      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a member of this room' } });
+    }
+
+    const reactions = new Map(Object.entries(message.reactions || {}));
+    const existingReaction = reactions.get(emoji);
+    
+    if (existingReaction) {
+      const userIndex = existingReaction.userIds.indexOf(request.user.userId);
+      if (userIndex > -1) {
+        existingReaction.userIds.splice(userIndex, 1);
+        existingReaction.count = existingReaction.userIds.length;
+        
+        if (existingReaction.count === 0) {
+          reactions.delete(emoji);
+        } else {
+          reactions.set(emoji, existingReaction);
+        }
+        
+        await message.save();
+
+        // Broadcast reaction remove event
+        await centrifugoService.publishToChannel(`room:${message.rid}`, {
+          type: 'reaction_remove',
+          messageId: id,
+          roomId: message.rid,
+          emoji,
+          userId: request.user.userId,
+          reaction: existingReaction.count > 0 ? existingReaction : null,
+        });
+      }
+    }
+
+    return reply.send({ success: true });
+  });
 }

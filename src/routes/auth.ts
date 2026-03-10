@@ -12,7 +12,7 @@ import {
   revokeSession,
 } from '../services/auth.service';
 import { authenticate } from '../middleware/auth';
-import { getRedis } from '../services/redis.service';
+import { getRedis, broadcastPresenceChange } from '../services/redis.service';
 
 const registerSchema = z.object({
   username: z.string().min(3).max(32).regex(/^[a-z0-9_]+$/),
@@ -99,6 +99,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const { accessToken, refreshToken } = await createSession(userId, { ip: request.ip });
     await User.updateOne({ _id: userId }, { status: 'online', lastSeen: new Date() });
+    await broadcastPresenceChange(userId, 'online', username);
 
     return reply.code(201).send({
       user: { _id: user._id, username: user.username, name: user.name, email: user.email },
@@ -174,6 +175,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const { accessToken, refreshToken } = await createSession(user._id as string, { ip: request.ip });
     await User.updateOne({ _id: user._id }, { status: 'online', lastSeen: new Date() });
+    await broadcastPresenceChange(user._id as string, 'online', user.username);
 
     return reply.send({
       user: { _id: user._id, username: user.username, name: user.name, email: user.email, status: 'online' },
@@ -237,6 +239,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   }, async (request, reply) => {
     await revokeSession(request.user.sessionId);
     await User.updateOne({ _id: request.user.userId }, { status: 'offline', lastSeen: new Date() });
+    
+    // Get username for broadcast
+    const user = await User.findById(request.user.userId).select('username').lean();
+    if (user) {
+      await broadcastPresenceChange(request.user.userId, 'offline', user.username);
+    }
+    
     return reply.send({ success: true });
   });
 
