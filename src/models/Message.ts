@@ -24,6 +24,12 @@ export interface IReaction {
   count: number;
 }
 
+export interface IReplyTo {
+  _id: string;
+  msg: string;
+  u: { _id: string; username: string };
+}
+
 // @ts-expect-error - Using custom string _id instead of ObjectId
 export interface IMessage extends Document {
   _id: string;
@@ -34,6 +40,7 @@ export interface IMessage extends Document {
   attachments: IAttachment[];
   reactions: Record<string, IReaction>;
   mentions: IMention[];
+  replyTo?: IReplyTo;
   tmid?: string;
   tcount?: number;
   tlm?: Date;
@@ -83,6 +90,14 @@ const messageSchema = new Schema<IMessage>(
         type: { type: String, enum: ['user', 'here', 'all'] },
       },
     ],
+    replyTo: {
+      _id: { type: String },
+      msg: { type: String },
+      u: {
+        _id: { type: String },
+        username: { type: String },
+      },
+    },
     tmid: { type: String, default: null },
     tcount: { type: Number, default: null },
     tlm: { type: Date, default: null },

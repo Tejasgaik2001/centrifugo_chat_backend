@@ -13,6 +13,25 @@ const sendMessageSchema = z.object({
   rid: z.string(),
   msg: z.string().max(10000),
   tmid: z.string().optional(),
+  replyTo: z.object({
+    _id: z.string(),
+    msg: z.string(),
+    u: z.object({
+      _id: z.string(),
+      username: z.string(),
+    }),
+  }).optional(),
+  attachments: z.array(z.object({
+    type: z.enum(['image', 'video', 'audio', 'file']),
+    url: z.string(),
+    name: z.string(),
+    size: z.number(),
+    mimeType: z.string(),
+    thumbnailUrl: z.string().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    duration: z.number().optional(),
+  })).optional(),
 });
 
 const editMessageSchema = z.object({
@@ -52,6 +71,37 @@ const messageResponseSchema = {
           _id: { type: 'string' },
           username: { type: 'string' },
           type: { type: 'string' },
+        },
+      },
+    },
+    replyTo: {
+      type: ['object', 'null'],
+      properties: {
+        _id: { type: 'string' },
+        msg: { type: 'string' },
+        u: {
+          type: 'object',
+          properties: {
+            _id: { type: 'string' },
+            username: { type: 'string' },
+          },
+        },
+      },
+    },
+    attachments: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string' },
+          url: { type: 'string' },
+          name: { type: 'string' },
+          size: { type: 'number' },
+          mimeType: { type: 'string' },
+          thumbnailUrl: { type: 'string' },
+          width: { type: 'number' },
+          height: { type: 'number' },
+          duration: { type: 'number' },
         },
       },
     },
@@ -151,7 +201,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const { rid, msg, tmid } = body.data;
+    const { rid, msg, tmid, replyTo, attachments } = body.data;
 
     const subscription = await Subscription.findOne({
       rid,
@@ -196,6 +246,8 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       u: { _id: sender._id, username: sender.username },
       msg,
       tmid: tmid ?? null,
+      replyTo: replyTo ?? null,
+      attachments: attachments ?? [],
       mentions,
       ts: new Date(),
     });

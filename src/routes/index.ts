@@ -3,6 +3,7 @@ import { authRoutes } from './auth';
 import { userRoutes } from './users';
 import { roomRoutes } from './rooms';
 import { messageRoutes } from './messages';
+import { fileRoutes } from './files';
 import centrifugoRoutes from './centrifugo';
 import { healthRoutes } from './health';
 
@@ -21,6 +22,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       await roomRoutes(instance);
       console.log('[Routes] Registering message routes...');
       await messageRoutes(instance);
+      console.log('[Routes] Registering file routes...');
+      await fileRoutes(instance);
       console.log('[Routes] Registering centrifugo routes...');
       await centrifugoRoutes(instance);
       console.log('[Routes] All routes registered successfully');

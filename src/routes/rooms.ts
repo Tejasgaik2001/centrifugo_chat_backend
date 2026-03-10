@@ -416,4 +416,49 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     const messages = await Message.find({ _id: { $in: room.pinnedMessages } }).lean();
     return reply.send({ messages });
   });
+
+  app.post('/rooms/:rid/typing', {
+    preHandler: [authenticate],
+    schema: {
+      tags: ['Rooms'],
+      summary: 'Broadcast typing status',
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: {
+          rid: { type: 'string' },
+        },
+      },
+      body: {
+        type: 'object',
+        required: ['isTyping'],
+        properties: {
+          isTyping: { type: 'boolean' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { rid } = request.params as { rid: string };
+    const { isTyping } = request.body as { isTyping: boolean };
+
+    const user = await User.findById(request.user.userId).lean();
+    if (!user) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'User not found' } });
+
+    const { centrifugoService } = await import('../services/centrifugo.service.js');
+    if (isTyping) {
+      await centrifugoService.publishTypingStart(rid, user._id.toString(), user.username);
+    } else {
+      await centrifugoService.publishTypingStop(rid, user._id.toString(), user.username);
+    }
+
+    return reply.send({ success: true });
+  });
 }

@@ -5,6 +5,9 @@ import websocketPlugin from '@fastify/websocket';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
+import multipart from '@fastify/multipart';
+import staticPlugin from '@fastify/static';
+import path from 'path';
 import { config } from './config';
 import { connectDatabase } from './services/database.service';
 import { closeRedis } from './services/redis.service';
@@ -72,6 +75,17 @@ async function start(): Promise<void> {
   });
 
   await app.register(websocketPlugin);
+
+  await app.register(multipart, {
+    limits: {
+      fileSize: 50 * 1024 * 1024, // 50 MB
+    },
+  });
+
+  await app.register(staticPlugin, {
+    root: path.join(process.cwd(), 'uploads'),
+    prefix: '/uploads/',
+  });
 
   // Add basic routes to test server functionality
   app.get('/', async (_request, reply) => {
