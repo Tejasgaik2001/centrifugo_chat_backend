@@ -3,7 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 // @ts-expect-error - Using custom string _id instead of ObjectId
 export interface ISubscription extends Document {
   _id: string;
-  rid: string;
+  roomId: string;
   u: { _id: string; username: string };
   name: string;
   unread: number;
@@ -18,7 +18,7 @@ export interface ISubscription extends Document {
 const subscriptionSchema = new Schema<ISubscription>(
   {
     _id: { type: String, required: true },
-    rid: { type: String, required: true },
+    roomId: { type: String, required: true },
     u: {
       _id: { type: String, required: true },
       username: { type: String, required: true },
@@ -41,7 +41,7 @@ const subscriptionSchema = new Schema<ISubscription>(
   }
 );
 
-subscriptionSchema.index({ 'u._id': 1, rid: 1 }, { unique: true });
-subscriptionSchema.index({ rid: 1 });
+subscriptionSchema.index({ 'u._id': 1, roomId: 1 }, { unique: true });
+subscriptionSchema.index({ roomId: 1 });
 
 export const Subscription = mongoose.model<ISubscription>('Subscription', subscriptionSchema);

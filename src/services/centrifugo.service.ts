@@ -67,7 +67,8 @@ class CentrifugoService {
         roomId: roomId,
         createdAt: message.ts,
         attachments: message.attachments || [],
-        tmid: message.tmid,
+        threadId: message.threadId,
+        replyTo: message.replyTo,
       },
     });
   }

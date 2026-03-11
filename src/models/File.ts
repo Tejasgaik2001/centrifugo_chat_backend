@@ -5,7 +5,7 @@ export interface IFile extends Document {
   _id: string;
   name: string;
   userId: string;
-  rid: string;
+  roomId: string;
   messageId: string;
   mimeType: string;
   size: number;
@@ -23,7 +23,7 @@ const fileSchema = new Schema<IFile>(
     _id: { type: String, required: true },
     name: { type: String, required: true },
     userId: { type: String, required: true },
-    rid: { type: String, required: true },
+    roomId: { type: String, required: true },
     messageId: { type: String, required: true },
     mimeType: { type: String, required: true },
     size: { type: Number, required: true },
@@ -40,7 +40,7 @@ const fileSchema = new Schema<IFile>(
   }
 );
 
-fileSchema.index({ rid: 1 });
+fileSchema.index({ roomId: 1 });
 fileSchema.index({ userId: 1 });
 fileSchema.index({ storageKey: 1 }, { unique: true });
 

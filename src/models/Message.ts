@@ -33,7 +33,7 @@ export interface IReplyTo {
 // @ts-expect-error - Using custom string _id instead of ObjectId
 export interface IMessage extends Document {
   _id: string;
-  rid: string;
+  roomId: string;
   u: { _id: string; username: string };
   msg: string;
   type: 'text' | 'file' | 'poll' | 'system';
@@ -41,7 +41,7 @@ export interface IMessage extends Document {
   reactions: Record<string, IReaction>;
   mentions: IMention[];
   replyTo?: IReplyTo;
-  tmid?: string;
+  threadId?: string;
   tcount?: number;
   tlm?: Date;
   editedAt?: Date;
@@ -59,7 +59,7 @@ export interface IMessage extends Document {
 const messageSchema = new Schema<IMessage>(
   {
     _id: { type: String, required: true },
-    rid: { type: String, required: true },
+    roomId: { type: String, required: true },
     u: {
       _id: { type: String, required: true },
       username: { type: String, required: true },
@@ -98,7 +98,7 @@ const messageSchema = new Schema<IMessage>(
         username: { type: String },
       },
     },
-    tmid: { type: String, default: null },
+    threadId: { type: String, default: null },
     tcount: { type: Number, default: null },
     tlm: { type: Date, default: null },
     editedAt: { type: Date, default: null },
@@ -126,8 +126,8 @@ const messageSchema = new Schema<IMessage>(
   }
 );
 
-messageSchema.index({ rid: 1, ts: -1 });
-messageSchema.index({ tmid: 1 });
+messageSchema.index({ roomId: 1, ts: -1 });
+messageSchema.index({ threadId: 1 });
 messageSchema.index({ 'u._id': 1 });
 messageSchema.index({ ts: 1 });
 messageSchema.index({ msg: 'text' });

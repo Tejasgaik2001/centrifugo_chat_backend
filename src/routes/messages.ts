@@ -10,9 +10,9 @@ import { publishToRoom } from '../services/redis.service';
 import { centrifugoService } from '../services/centrifugo.service.js';
 
 const sendMessageSchema = z.object({
-  rid: z.string(),
+  roomId: z.string(),
   msg: z.string().max(10000),
-  tmid: z.string().optional(),
+  threadId: z.string().optional(),
   replyTo: z.object({
     _id: z.string(),
     msg: z.string(),
@@ -42,7 +42,7 @@ const messageResponseSchema = {
   type: 'object',
   properties: {
     _id: { type: 'string' },
-    rid: { type: 'string' },
+    roomId: { type: 'string' },
     msg: { type: 'string' },
     u: {
       type: 'object',
@@ -61,7 +61,7 @@ const messageResponseSchema = {
       },
     },
     isDeleted: { type: 'boolean' },
-    tmid: { type: ['string', 'null'] },
+    threadId: { type: ['string', 'null'] },
     tcount: { type: 'number' },
     mentions: {
       type: 'array',
@@ -109,7 +109,7 @@ const messageResponseSchema = {
 };
 
 export async function messageRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/rooms/:rid/messages', {
+  app.get('/rooms/:roomId/messages', {
     preHandler: [authenticate],
     schema: {
       tags: ['Messages'],
@@ -118,7 +118,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       params: {
         type: 'object',
         properties: {
-          rid: { type: 'string' },
+          roomId: { type: 'string' },
         },
       },
       querystring: {
@@ -140,11 +140,11 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       },
     },
   }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
+    const { roomId } = request.params as { roomId: string };
     const { limit = '50', before } = request.query as { limit?: string; before?: string };
 
     const subscription = await Subscription.findOne({
-      rid,
+      roomId,
       'u._id': request.user.userId,
       open: true,
     }).lean();
@@ -152,7 +152,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a member of this room' } });
     }
 
-    const query: Record<string, unknown> = { rid, isDeleted: false };
+    const query: Record<string, unknown> = { roomId, isDeleted: false };
     if (before) {
       const refMessage = await Message.findById(before).lean();
       if (refMessage) query.ts = { $lt: refMessage.ts };
@@ -160,7 +160,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
     const limitNum = Number.parseInt(limit, 10);
     const messages = await Message.find(query).sort({ ts: -1 }).limit(limitNum).lean();
-    const total = await Message.countDocuments({ rid, isDeleted: false });
+    const total = await Message.countDocuments({ roomId, isDeleted: false });
 
     return reply.send({
       messages: messages.toReversed(),
@@ -177,11 +177,42 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       security: [{ bearerAuth: [] }],
       body: {
         type: 'object',
-        required: ['rid', 'msg'],
+        required: ['roomId', 'msg'],
         properties: {
-          rid: { type: 'string' },
+          roomId: { type: 'string' },
           msg: { type: 'string', maxLength: 10000 },
-          tmid: { type: 'string' },
+          threadId: { type: 'string' },
+          replyTo: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              msg: { type: 'string' },
+              u: {
+                type: 'object',
+                properties: {
+                  _id: { type: 'string' },
+                  username: { type: 'string' },
+                },
+              },
+            },
+          },
+          attachments: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                url: { type: 'string' },
+                name: { type: 'string' },
+                size: { type: 'number' },
+                mimeType: { type: 'string' },
+                thumbnailUrl: { type: 'string' },
+                width: { type: 'number' },
+                height: { type: 'number' },
+                duration: { type: 'number' },
+              },
+            },
+          },
         },
       },
       response: {
@@ -201,10 +232,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const { rid, msg, tmid, replyTo, attachments } = body.data;
+    const { roomId, msg, threadId, replyTo, attachments } = body.data;
 
     const subscription = await Subscription.findOne({
-      rid,
+      roomId,
       'u._id': request.user.userId,
       open: true,
     }).lean();
@@ -212,7 +243,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a member of this room' } });
     }
 
-    const room = await Room.findById(rid).lean();
+    const room = await Room.findById(roomId).lean();
     if (!room) {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Room not found' } });
     }
@@ -242,10 +273,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     const messageId = uuidv4();
     const message = await Message.create({
       _id: messageId,
-      rid,
+      roomId,
       u: { _id: sender._id, username: sender.username },
       msg,
-      tmid: tmid ?? null,
+      threadId: threadId ?? null,
       replyTo: replyTo ?? null,
       attachments: attachments ?? [],
       mentions,
@@ -253,7 +284,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     });
 
     await Room.updateOne(
-      { _id: rid },
+      { _id: roomId },
       {
         lastMessage: {
           id: messageId,
@@ -265,18 +296,18 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     );
 
     await Subscription.updateMany(
-      { rid, 'u._id': { $ne: request.user.userId } },
+      { roomId, 'u._id': { $ne: request.user.userId } },
       { $inc: { unread: 1 } }
     );
 
-    if (tmid) {
-      await Message.updateOne({ _id: tmid }, { $inc: { tcount: 1 }, tlm: new Date() });
+    if (threadId) {
+      await Message.updateOne({ _id: threadId }, { $inc: { tcount: 1 }, tlm: new Date() });
     }
 
-    await publishToRoom(rid, { type: 'message_new', roomId: rid, message });
+    await publishToRoom(roomId, { type: 'message_new', roomId: roomId, message });
 
     // Publish to Centrifugo for real-time WebSocket delivery
-    await centrifugoService.publishMessage(rid, message);
+    await centrifugoService.publishMessage(roomId, message);
 
     return reply.code(201).send({ message });
   });
@@ -336,10 +367,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       { new: true }
     ).lean();
 
-    await publishToRoom(message.rid, { type: 'message_updated', roomId: message.rid, message: updated });
+    await publishToRoom(message.roomId, { type: 'message_updated', roomId: message.roomId, message: updated });
 
     // Publish to Centrifugo for real-time WebSocket delivery
-    await centrifugoService.publishMessageUpdate(message.rid, updated);
+    await centrifugoService.publishMessageUpdate(message.roomId, updated);
 
     return reply.send({ message: updated });
   });
@@ -367,7 +398,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Message not found' } });
     }
 
-    const room = await Room.findById(message.rid).lean();
+    const room = await Room.findById(message.roomId).lean();
     const isOwner = message.u._id === request.user.userId;
     const isMod = room?.moderatorIds.includes(request.user.userId) ?? false;
 
@@ -385,10 +416,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       }
     );
 
-    await publishToRoom(message.rid, { type: 'message_deleted', roomId: message.rid, messageId: id });
+    await publishToRoom(message.roomId, { type: 'message_deleted', roomId: message.roomId, messageId: id });
 
     // Publish to Centrifugo for real-time WebSocket delivery
-    await centrifugoService.publishMessageDelete(message.rid, id);
+    await centrifugoService.publishMessageDelete(message.roomId, id);
 
     return reply.code(204).send();
   });
@@ -400,7 +431,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Message not found' } });
     }
 
-    const room = await Room.findOne({ _id: message.rid, moderatorIds: request.user.userId }).lean();
+    const room = await Room.findOne({ _id: message.roomId, moderatorIds: request.user.userId }).lean();
     if (!room) {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a moderator' } });
     }
@@ -410,7 +441,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       { _id: id },
       { pinnedAt: new Date(), pinnedBy: { _id: request.user.userId, username: sender!.username } }
     );
-    await Room.updateOne({ _id: message.rid }, { $addToSet: { pinnedMessages: id } });
+    await Room.updateOne({ _id: message.roomId }, { $addToSet: { pinnedMessages: id } });
 
     return reply.send({ success: true });
   });
@@ -422,20 +453,20 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Message not found' } });
     }
 
-    const room = await Room.findOne({ _id: message.rid, moderatorIds: request.user.userId }).lean();
+    const room = await Room.findOne({ _id: message.roomId, moderatorIds: request.user.userId }).lean();
     if (!room) {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a moderator' } });
     }
 
     await Message.updateOne({ _id: id }, { pinnedAt: null, pinnedBy: null });
-    await Room.updateOne({ _id: message.rid }, { $pull: { pinnedMessages: id } });
+    await Room.updateOne({ _id: message.roomId }, { $pull: { pinnedMessages: id } });
 
     return reply.send({ success: true });
   });
 
-  app.get('/rooms/:rid/threads', { preHandler: [authenticate] }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
-    const messages = await Message.find({ rid, tcount: { $gt: 0 }, isDeleted: false })
+  app.get('/rooms/:roomId/threads', { preHandler: [authenticate] }, async (request, reply) => {
+    const { roomId } = request.params as { roomId: string };
+    const messages = await Message.find({ roomId, tcount: { $gt: 0 }, isDeleted: false })
       .sort({ tlm: -1 })
       .lean();
     return reply.send({ messages });
@@ -443,7 +474,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/messages/:id/thread', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const replies = await Message.find({ tmid: id, isDeleted: false }).sort({ ts: 1 }).lean();
+    const replies = await Message.find({ threadId: id, isDeleted: false }).sort({ ts: 1 }).lean();
     return reply.send({ messages: replies });
   });
 
@@ -481,7 +512,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const subscription = await Subscription.findOne({
-      rid: message.rid,
+      roomId: message.roomId,
       'u._id': request.user.userId,
       open: true,
     }).lean();
@@ -495,7 +526,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       { $addToSet: { readBy: request.user.userId } }
     );
 
-    await centrifugoService.publishReadReceipt(message.rid, request.user.userId, id);
+    await centrifugoService.publishReadReceipt(message.roomId, request.user.userId, id);
 
     return reply.send({ success: true });
   });
@@ -548,7 +579,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
     // Check if user is member of the room
     const subscription = await Subscription.findOne({
-      rid: message.rid,
+      roomId: message.roomId,
       'u._id': request.user.userId,
       open: true,
     }).lean();
@@ -583,10 +614,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     await message.save();
 
     // Broadcast reaction add event
-    await centrifugoService.publishToChannel(`room:${message.rid}`, {
+    await centrifugoService.publishToChannel(`room:${message.roomId}`, {
       type: 'reaction_add',
       messageId: id,
-      roomId: message.rid,
+      roomId: message.roomId,
       emoji,
       userId: request.user.userId,
       reaction: reactions.get(emoji),
@@ -628,7 +659,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
     // Check if user is member of the room
     const subscription = await Subscription.findOne({
-      rid: message.rid,
+      roomId: message.roomId,
       'u._id': request.user.userId,
       open: true,
     }).lean();
@@ -655,10 +686,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
         await message.save();
 
         // Broadcast reaction remove event
-        await centrifugoService.publishToChannel(`room:${message.rid}`, {
+        await centrifugoService.publishToChannel(`room:${message.roomId}`, {
           type: 'reaction_remove',
           messageId: id,
-          roomId: message.rid,
+          roomId: message.roomId,
           emoji,
           userId: request.user.userId,
           reaction: existingReaction.count > 0 ? existingReaction : null,

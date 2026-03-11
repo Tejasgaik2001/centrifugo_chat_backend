@@ -25,7 +25,7 @@ const roomResponseSchema = {
   type: 'object',
   properties: {
     _id: { type: 'string' },
-    rid: { type: 'string' },
+    roomId: { type: 'string' },
     name: { type: ['string', 'null'] },
     type: { type: 'string' },
     unread: { type: 'number' },
@@ -78,14 +78,14 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       'u._id': request.user.userId,
       open: true,
     }).lean();
-    const roomIds = subscriptions.map((s) => s.rid);
+    const roomIds = subscriptions.map((s) => s.roomId);
     const rooms = await Room.find({ _id: { $in: roomIds } }).lean();
 
     const result = rooms.map((room) => {
-      const sub = subscriptions.find((s) => s.rid === room._id.toString());
+      const sub = subscriptions.find((s) => s.roomId === room._id.toString());
       return {
         _id: room._id.toString(),
-        rid: room._id.toString(),
+        roomId: room._id.toString(),
         name: room.name ?? sub?.name ?? null,
         type: room.type,
         unread: sub?.unread ?? 0,
@@ -157,7 +157,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
 
     const subscriptions = members.map((m) => ({
       _id: uuidv4(),
-      rid: roomId,
+      roomId: roomId,
       u: { _id: m._id, username: m.username },
       name: body.data.name,
     }));
@@ -169,7 +169,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       type: 'room_created',
       room: {
         _id: roomId,
-        rid: roomId,
+        roomId: roomId,
         name: room.name,
         type: room.type,
         memberIds: room.memberIds,
@@ -181,7 +181,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send({ room });
   });
 
-  app.get('/rooms/:rid', {
+  app.get('/rooms/:roomId', {
     preHandler: [authenticate],
     schema: {
       tags: ['Rooms'],
@@ -190,7 +190,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       params: {
         type: 'object',
         properties: {
-          rid: { type: 'string' },
+          roomId: { type: 'string' },
         },
       },
       response: {
@@ -203,16 +203,16 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       },
     },
   }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
-    const room = await Room.findOne({ _id: rid, memberIds: request.user.userId }).lean();
+    const { roomId } = request.params as { roomId: string };
+    const room = await Room.findOne({ _id: roomId, memberIds: request.user.userId }).lean();
     if (!room) {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Room not found' } });
     }
     return reply.send({ room });
   });
 
-  app.patch('/rooms/:rid', { preHandler: [authenticate] }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
+  app.patch('/rooms/:roomId', { preHandler: [authenticate] }, async (request, reply) => {
+    const { roomId } = request.params as { roomId: string };
     const body = updateRoomSchema.safeParse(request.body);
     if (!body.success) {
       return reply.code(400).send({
@@ -220,42 +220,42 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    const room = await Room.findOne({ _id: rid, moderatorIds: request.user.userId }).lean();
+    const room = await Room.findOne({ _id: roomId, moderatorIds: request.user.userId }).lean();
     if (!room) {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a moderator' } });
     }
 
-    const updated = await Room.findByIdAndUpdate(rid, body.data, { new: true }).lean();
+    const updated = await Room.findByIdAndUpdate(roomId, body.data, { new: true }).lean();
     return reply.send({ room: updated });
   });
 
-  app.delete('/rooms/:rid', { preHandler: [authenticate] }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
-    const room = await Room.findOne({ _id: rid, createdBy: request.user.userId }).lean();
+  app.delete('/rooms/:roomId', { preHandler: [authenticate] }, async (request, reply) => {
+    const { roomId } = request.params as { roomId: string };
+    const room = await Room.findOne({ _id: roomId, createdBy: request.user.userId }).lean();
     if (!room) {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not the room creator' } });
     }
 
-    await Room.deleteOne({ _id: rid });
-    await Subscription.deleteMany({ rid });
+    await Room.deleteOne({ _id: roomId });
+    await Subscription.deleteMany({ roomId });
     return reply.code(204).send();
   });
 
-  app.post('/rooms/:rid/members', { preHandler: [authenticate] }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
+  app.post('/rooms/:roomId/members', { preHandler: [authenticate] }, async (request, reply) => {
+    const { roomId } = request.params as { roomId: string };
     const body = z.object({ userIds: z.array(z.string()) }).safeParse(request.body);
     if (!body.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input' } });
     }
 
-    const room = await Room.findById(rid).lean();
+    const room = await Room.findById(roomId).lean();
     if (!room) {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Room not found' } });
     }
 
     const newMembers = await User.find({ _id: { $in: body.data.userIds } }).lean();
     await Room.updateOne(
-      { _id: rid },
+      { _id: roomId },
       {
         $addToSet: {
           memberIds: { $each: body.data.userIds },
@@ -267,7 +267,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
 
     const subscriptions = newMembers.map((m) => ({
       _id: uuidv4(),
-      rid,
+      roomId,
       u: { _id: m._id, username: m.username },
       name: room.name ?? '',
     }));
@@ -276,9 +276,9 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true });
   });
 
-  app.delete('/rooms/:rid/members/:userId', { preHandler: [authenticate] }, async (request, reply) => {
-    const { rid, userId } = request.params as { rid: string; userId: string };
-    const room = await Room.findOne({ _id: rid, moderatorIds: request.user.userId }).lean();
+  app.delete('/rooms/:roomId/members/:userId', { preHandler: [authenticate] }, async (request, reply) => {
+    const { roomId, userId } = request.params as { roomId: string; userId: string };
+    const room = await Room.findOne({ _id: roomId, moderatorIds: request.user.userId }).lean();
     if (!room) {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Not a moderator' } });
     }
@@ -289,13 +289,13 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     }
 
     await Room.updateOne(
-      { _id: rid },
+      { _id: roomId },
       {
         $pull: { memberIds: userId, usernames: member.username },
         $inc: { memberCount: -1 },
       }
     );
-    await Subscription.deleteOne({ rid, 'u._id': userId });
+    await Subscription.deleteOne({ roomId, 'u._id': userId });
 
     return reply.code(204).send();
   });
@@ -353,13 +353,13 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     await Subscription.insertMany([
       {
         _id: uuidv4(),
-        rid: roomId,
+        roomId: roomId,
         u: { _id: requestingUser._id, username: requestingUser.username },
         name: targetUser.username,
       },
       {
         _id: uuidv4(),
-        rid: roomId,
+        roomId: roomId,
         u: { _id: targetUser._id, username: targetUser.username },
         name: requestingUser.username,
       },
@@ -371,7 +371,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       type: 'room_created',
       room: {
         _id: roomId,
-        rid: roomId,
+        roomId: roomId,
         name: null,
         type: 'd',
         memberIds: [requestingUser._id.toString(), targetUser._id.toString()],
@@ -383,32 +383,32 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send({ room });
   });
 
-  app.post('/rooms/:rid/read', { preHandler: [authenticate] }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
+  app.post('/rooms/:roomId/read', { preHandler: [authenticate] }, async (request, reply) => {
+    const { roomId } = request.params as { roomId: string };
     
     await Subscription.updateOne(
-      { rid, 'u._id': request.user.userId },
+      { roomId, 'u._id': request.user.userId },
       { unread: 0, userMentions: 0, ls: new Date() }
     );
 
     await Message.updateMany(
-      { rid, 'u._id': { $ne: request.user.userId }, readBy: { $ne: request.user.userId } },
+      { roomId, 'u._id': { $ne: request.user.userId }, readBy: { $ne: request.user.userId } },
       { $addToSet: { readBy: request.user.userId } }
     );
 
     // Broadcast read receipt
-    const lastMessage = await Message.findOne({ rid }).sort({ ts: -1 }).lean();
+    const lastMessage = await Message.findOne({ roomId }).sort({ ts: -1 }).lean();
     if (lastMessage) {
       const { centrifugoService } = await import('../services/centrifugo.service');
-      await centrifugoService.publishReadReceipt(rid, request.user.userId, lastMessage._id.toString());
+      await centrifugoService.publishReadReceipt(roomId, request.user.userId, lastMessage._id.toString());
     }
 
     return reply.send({ success: true });
   });
 
-  app.get('/rooms/:rid/pinned', { preHandler: [authenticate] }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
-    const room = await Room.findById(rid).lean();
+  app.get('/rooms/:roomId/pinned', { preHandler: [authenticate] }, async (request, reply) => {
+    const { roomId } = request.params as { roomId: string };
+    const room = await Room.findById(roomId).lean();
     if (!room) {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Room not found' } });
     }
@@ -417,7 +417,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ messages });
   });
 
-  app.post('/rooms/:rid/typing', {
+  app.post('/rooms/:roomId/typing', {
     preHandler: [authenticate],
     schema: {
       tags: ['Rooms'],
@@ -426,7 +426,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       params: {
         type: 'object',
         properties: {
-          rid: { type: 'string' },
+          roomId: { type: 'string' },
         },
       },
       body: {
@@ -446,7 +446,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       },
     },
   }, async (request, reply) => {
-    const { rid } = request.params as { rid: string };
+    const { roomId } = request.params as { roomId: string };
     const { isTyping } = request.body as { isTyping: boolean };
 
     const user = await User.findById(request.user.userId).lean();
@@ -454,9 +454,9 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
 
     const { centrifugoService } = await import('../services/centrifugo.service.js');
     if (isTyping) {
-      await centrifugoService.publishTypingStart(rid, user._id.toString(), user.username);
+      await centrifugoService.publishTypingStart(roomId, user._id.toString(), user.username);
     } else {
-      await centrifugoService.publishTypingStop(rid, user._id.toString(), user.username);
+      await centrifugoService.publishTypingStop(roomId, user._id.toString(), user.username);
     }
 
     return reply.send({ success: true });

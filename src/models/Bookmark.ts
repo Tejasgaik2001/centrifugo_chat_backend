@@ -5,7 +5,7 @@ export interface IBookmark extends Document {
   _id: string;
   userId: string;
   messageId: string;
-  rid: string;
+  roomId: string;
   createdAt: Date;
 }
 
@@ -14,7 +14,7 @@ const bookmarkSchema = new Schema<IBookmark>(
     _id: { type: String, required: true },
     userId: { type: String, required: true },
     messageId: { type: String, required: true },
-    rid: { type: String, required: true },
+    roomId: { type: String, required: true },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },

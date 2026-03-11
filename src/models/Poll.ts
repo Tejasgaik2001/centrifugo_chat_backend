@@ -10,8 +10,8 @@ export interface IPollOption {
 // @ts-expect-error - Using custom string _id instead of ObjectId
 export interface IPoll extends Document {
   _id: string;
-  rid: string;
-  messageId: string;
+  roomId: string;
+  msgId: string;
   createdBy: string;
   question: string;
   options: IPollOption[];
@@ -25,8 +25,8 @@ export interface IPoll extends Document {
 const pollSchema = new Schema<IPoll>(
   {
     _id: { type: String, required: true },
-    rid: { type: String, required: true },
-    messageId: { type: String, required: true },
+    roomId: { type: String, required: true },
+    msgId: { type: String, required: true },
     createdBy: { type: String, required: true },
     question: { type: String, required: true, maxlength: 300 },
     options: [
